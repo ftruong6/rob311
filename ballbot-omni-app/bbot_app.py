@@ -310,15 +310,15 @@ if __name__ == "__main__":
     theta_roll_pid.output_limits = (-MAX_DUTY, MAX_DUTY)
     theta_pitch_pid.output_limits = (-MAX_DUTY, MAX_DUTY)
     
-    dots = init_lights(MAX_BRIGHTNESS)
+    #dots = init_lights(MAX_BRIGHTNESS)
 
     for t in SoftRealtimeLoop(dt=DT, report=True):
         try:
             states = ser_dev.get_cur_topic_data(121)[0]
         except KeyError as e:
             print("<< CALIBRATING >>")
-            dots.fill(color=(255, 191, 0))
-            dots.show()
+            #dots.fill(color=(255, 191, 0))
+            #dots.show()
             continue
 
         Tx = theta_roll_pid(states['theta_roll'])
@@ -339,12 +339,12 @@ if __name__ == "__main__":
         if np.abs(states['theta_roll']) != 0.0:
             danger = compute_dots(states['theta_roll'], states['theta_pitch'])
 
-        for dot in range(N_DOTS):
-            if dot in danger:
-                    dots[dot] = (255, 20, 20)
-            else:
-                    dots[dot] = (53, 118, 174)
-        dots.show()
+        ##for dot in range(N_DOTS):
+          ##  if dot in danger:
+            ##        dots[dot] = (255, 20, 20)
+            ## else:
+               ##     dots[dot] = (53, 118, 174)
+        #dots.show()
 
     print("Resetting Mo commands.")
     commands['kill'] = 1.0
@@ -353,5 +353,5 @@ if __name__ == "__main__":
     commands['motor_3_duty'] = 0.0
     ser_dev.send_topic_data(101, commands)
 
-    dots.fill(color=(0, 0, 0))
-    dots.show()
+    #dots.fill(color=(0, 0, 0))
+    #dots.show()

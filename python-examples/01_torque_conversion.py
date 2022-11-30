@@ -35,12 +35,12 @@ def compute_motor_torques(Tx, Ty, alpha):
     T3: Motor Torque 3
 
     '''
-    # YOUR
-    # CODE 
-    # GOES 
-    # HERE
+    Tz = 0
+    T1 = (1/3)*(Tz - (2*Ty)/(np.cos(ALPHA)))
+    T2 = (1/3)*(Tz + (1/np.cos(ALPHA))*(-np.sqrt(3)*Tx + Ty))
+    T3 = (1/3)*(Tz + (1/(np.cos(ALPHA)))*(np.sqrt(3)*Tx + Ty))
 
-    return 0, 0, 0
+    return T1, T2, T3
 
 if __name__ == "__main__":
     start = time.time()
@@ -60,6 +60,15 @@ if __name__ == "__main__":
         T1, T2, T3 = compute_motor_torques(Tx, Ty, ALPHA)
 
         # Append your computed motor torques to their corresponding arrays
+        T1_array.append(T1)
+        T2_array.append(T2)
+        T3_array.append(T3)
 
+        t = time.time() - start
+        time.sleep(DT - ((t)%DT))
     
     # Save your arrays as a .csv file
+    np.savetxt('T1.csv',T1_array, delimiter = ",") 
+    np.savetxt('T2.csv',T2_array, delimiter = ",")
+    np.savetxt('T3.csv',T3_array, delimiter = ",")
+    
