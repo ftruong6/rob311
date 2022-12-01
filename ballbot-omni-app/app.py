@@ -7,7 +7,6 @@ from MBot.Messages.message_defs import mo_states_dtype, mo_cmds_dtype, mo_pid_pa
 from MBot.SerialProtocol.protocol import SerialProtocol
 from DataLogger import dataLogger
 import ps4_controller_api as ps4
-import FIR as fir
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -86,8 +85,6 @@ class LoopKiller:
             self._kill_now = False
             self._kill_soon = False
             self._soft_kill_time = None
-
-
 
 class SoftRealtimeLoop:
     def __init__(self, dt=0.001, report=False, fade=0.0):
@@ -201,21 +198,6 @@ MAX_LEAN = np.deg2rad(10)
 
 usePID = True
 
-# ---------------------------------------------------------------------------
-# LOWPASS FILTER PARAMETERS
-
-Fs = FREQ # Sampling rate in Hz
-Fc = 20.0 # Cut-off frequency of the filter in Hz
-
-Fn = Fc/Fs # Normalized equivalent of Fc
-N = 60 # Taps of the filter
-
-
-lowpass_filter_x = fir.FIR()
-lowpass_filter_x.lowpass(N, Fn)
-lowpass_filter_y = fir.FIR()
-lowpass_filter_y.lowpass(N, Fn)
-
 
 
 
@@ -225,8 +207,8 @@ lowpass_filter_y.lowpass(N, Fn)
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 13    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 13                                   # Adjust until the system balances
+KP_THETA_X = 0    #7.5   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 0                                   # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
@@ -234,8 +216,8 @@ KP_THETA_Y = 13                                   # Adjust until the system bala
 if(usePID):
     x_pid = PID(KP_THETA_X, 0, 0, DT) #0.1  tall 
     y_pid = PID(KP_THETA_Y, 0, 0, DT) #0.1
-    x_pid.Kd = 0.2
-    y_pid.Kd = 0.2
+    x_pid.Kd = 0.7
+    y_pid.Kd = 0.7
 
 
 # Wheel rotation to Ball rotation transformation matrix
@@ -314,9 +296,6 @@ def compute_phi(psi_1, psi_2, psi_3):
     # returns phi_x, phi_y, phi_z
     return phi[0][0], phi[1][0], phi[2][0]
 
-
-
-
 if __name__ == "__main__":
     trial_num = int(input('Trial Number? '))
     filename = 'ROB311_Stability_Test_%i' % trial_num
@@ -389,18 +368,8 @@ if __name__ == "__main__":
         psi_3 = states['psi_3']
 
         # Body lean angles
-        #theta_x = (states['theta_roll'])
-        #theta_y = (states['theta_pitch'])
-
-         # ---------------------------------------------------------------------------
-        # WMA filtering IMU values
-
-        theta_x_window.append(states['theta_roll'])
-        theta_y_window.append(states['theta_pitch'])
-
-        theta_x = wma_filter(theta_x_window)
-        theta_y = wma_filter(theta_y_window)
-
+        theta_x = (states['theta_roll'])
+        theta_y = (states['theta_pitch'])
 
         # Controller error terms
         error_x = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05) - theta_x
@@ -410,8 +379,6 @@ if __name__ == "__main__":
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
-        theta_x=lowpass_filter_x.filter(theta_x)
-        theta_y=lowpass_filter_x.filter(theta_y)
         
         if(usePID):
             x_pid.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05)
@@ -419,7 +386,6 @@ if __name__ == "__main__":
 
             Tx = x_pid(theta_x*(1))
             Ty = y_pid(theta_y*(1))
-           
         else:
             Tx = KP_THETA_X * error_x
             Ty = KP_THETA_Y * error_y
@@ -463,7 +429,7 @@ if __name__ == "__main__":
         print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
         ser_dev.send_topic_data(101, commands) # Send motor torques
 
-  
+    
     dl.writeOut()
 
     print("Resetting Motor commands.")
