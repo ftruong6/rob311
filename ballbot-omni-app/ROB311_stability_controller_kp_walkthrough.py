@@ -7,6 +7,7 @@ from MBot.Messages.message_defs import mo_states_dtype, mo_cmds_dtype, mo_pid_pa
 from MBot.SerialProtocol.protocol import SerialProtocol
 from DataLogger import dataLogger
 import ps4_controller_api as ps4
+import FIR as fir
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -85,6 +86,8 @@ class LoopKiller:
             self._kill_now = False
             self._kill_soon = False
             self._soft_kill_time = None
+
+
 
 class SoftRealtimeLoop:
     def __init__(self, dt=0.001, report=False, fade=0.0):
@@ -198,6 +201,21 @@ MAX_LEAN = np.deg2rad(10)
 
 usePID = True
 
+# ---------------------------------------------------------------------------
+# LOWPASS FILTER PARAMETERS
+
+Fs = FREQ # Sampling rate in Hz
+Fc = 20.0 # Cut-off frequency of the filter in Hz
+
+Fn = Fc/Fs # Normalized equivalent of Fc
+N = 60 # Taps of the filter
+
+
+lowpass_filter_x = fir.FIR()
+lowpass_filter_x.lowpass(N, Fn)
+lowpass_filter_y = fir.FIR()
+lowpass_filter_y.lowpass(N, Fn)
+
 
 
 
@@ -296,6 +314,8 @@ def compute_phi(psi_1, psi_2, psi_3):
     # returns phi_x, phi_y, phi_z
     return phi[0][0], phi[1][0], phi[2][0]
 
+
+
 if __name__ == "__main__":
     trial_num = int(input('Trial Number? '))
     filename = 'ROB311_Stability_Test_%i' % trial_num
@@ -379,6 +399,8 @@ if __name__ == "__main__":
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
+        theta_x=lowpass_filter_x.filter(theta_x)
+        theta_y=lowpass_filter_x.filter(theta_y)
         
         if(usePID):
             x_pid.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05)
