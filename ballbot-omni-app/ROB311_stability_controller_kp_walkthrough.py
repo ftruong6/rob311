@@ -7,6 +7,7 @@ from MBot.Messages.message_defs import mo_states_dtype, mo_cmds_dtype, mo_pid_pa
 from MBot.SerialProtocol.protocol import SerialProtocol
 from DataLogger import dataLogger
 import ps4_controller_api as ps4
+from collections import deque
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -207,8 +208,8 @@ usePID = True
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 0    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 0                                   # Adjust until the system balances
+KP_THETA_X = 13    #7.5   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 13                                   # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
@@ -216,8 +217,8 @@ KP_THETA_Y = 0                                   # Adjust until the system balan
 if(usePID):
     x_pid = PID(KP_THETA_X, 0, 0, DT) #0.1  tall 
     y_pid = PID(KP_THETA_Y, 0, 0, DT) #0.1
-    x_pid.Kd = 0.7
-    y_pid.Kd = 0.7
+    x_pid.Kd = 0.2
+    y_pid.Kd = 0.2
 
 
 # Wheel rotation to Ball rotation transformation matrix
@@ -295,6 +296,34 @@ def compute_phi(psi_1, psi_2, psi_3):
 
     # returns phi_x, phi_y, phi_z
     return phi[0][0], phi[1][0], phi[2][0]
+# WEIGHTED AVERAGE FILTER PARAMETERS
+
+WMA_WEIGHTS = np.array([0.1, 0.3, 0.4, 0.8])
+
+WMA_WINDOW_SIZE = len(WMA_WEIGHTS)
+WMA_NORM = WMA_WEIGHTS/np.sum(WMA_WEIGHTS)
+# ---------------------------------------------------------------------------
+    # WMA FILTER VARIABLES
+
+theta_x_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
+theta_y_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
+
+for _ in range(WMA_WINDOW_SIZE):
+    theta_x_window.append(0.0)
+    theta_y_window.append(0.0)
+
+theta_x = 0.0 # Variable for the filtered value
+theta_y = 0.0 # Variable for the filtered value
+
+dphi_x = 0.0 # Variable for the filtered value
+dphi_y = 0.0 # Variable for the filtered value
+
+    # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+def wma_filter(wma_window):
+    return np.sum(WMA_NORM * wma_window)
 
 if __name__ == "__main__":
     trial_num = int(input('Trial Number? '))
@@ -368,8 +397,18 @@ if __name__ == "__main__":
         psi_3 = states['psi_3']
 
         # Body lean angles
-        theta_x = (states['theta_roll'])
-        theta_y = (states['theta_pitch'])
+        #theta_x = (states['theta_roll'])
+        #theta_y = (states['theta_pitch'])
+
+         # ---------------------------------------------------------------------------
+        # WMA filtering IMU values
+
+        theta_x_window.append(states['theta_roll'])
+        theta_y_window.append(states['theta_pitch'])
+
+        theta_x = wma_filter(theta_x_window)
+        theta_y = wma_filter(theta_y_window)
+
 
         # Controller error terms
         error_x = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05) - theta_x
@@ -386,6 +425,7 @@ if __name__ == "__main__":
 
             Tx = x_pid(theta_x*(1))
             Ty = y_pid(theta_y*(1))
+           
         else:
             Tx = KP_THETA_X * error_x
             Ty = KP_THETA_Y * error_y
