@@ -198,20 +198,23 @@ RW = 0.0048
 RK = 0.1210
 ALPHA = np.deg2rad(45)
 
-MAX_PLANAR_DUTY = 0.75 #0.8
-MAX_LEAN = np.deg2rad(10)
+MAX_PLANAR_DUTY = 0.75 #0.8  
+MAX_LEAN = np.deg2rad(4)   #prev 10
+
 
 emf = 0.0636942675159
 
 usePID = True
 useFIR = False
-compensateBackEmf = True
+compensateBackEmf = False #bad feature :(
+velocityControl = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
 Fs = FREQ # Sampling rate in Hz
-Fc = 150.0 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating.
-
+Fc = 170 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
+Fc_psi = 1
+Fc_phi = 8
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
 
@@ -220,6 +223,14 @@ if(useFIR):
     lowpass_filter_x.lowpass(N, Fn)
     lowpass_filter_y = fir.FIR()
     lowpass_filter_y.lowpass(N, Fn)
+
+    #------- yeah...
+    lowpass_psi1 =  lpfs.LPFS()
+    lowpass_psi1.estimateGains(Fc,0.5)
+    lowpass_psi2 =  lpfs.LPFS()
+    lowpass_psi2.estimateGains(Fc,0.5)
+    lowpass_psi3 =  lpfs.LPFS()
+    lowpass_psi3.estimateGains(Fc,0.5)
 else:
     lowpass_filter_x = lpfs.LPFS()
     lowpass_filter_x.estimateGains(Fc,0.5)
@@ -227,12 +238,19 @@ else:
     lowpass_filter_y.estimateGains(Fc,0.5)
 
     lowpass_psi1 =  lpfs.LPFS()
-    lowpass_psi1.estimateGains(Fc,0.5)
+    lowpass_psi1.estimateGains(Fc_psi,0.5)
     lowpass_psi2 =  lpfs.LPFS()
-    lowpass_psi2.estimateGains(Fc,0.5)
+    lowpass_psi2.estimateGains(Fc_psi,0.5)
     lowpass_psi3 =  lpfs.LPFS()
-    lowpass_psi3.estimateGains(Fc,0.5)
+    lowpass_psi3.estimateGains(Fc_psi,0.5)
 
+lowpass_dphix = lpfs.LPFS()
+lowpass_dphix.estimateGains(Fc_phi,2)
+
+lowpass_dphiy = lpfs.LPFS()
+lowpass_dphiy.estimateGains(Fc_phi,2)
+thetaxDiff = Diff.Differentiator()
+thetayDiff = Diff.Differentiator()
 psi1Diff = Diff.Differentiator()
 psi2Diff = Diff.Differentiator()
 psi3Diff = Diff.Differentiator()
@@ -243,10 +261,15 @@ psi3Diff = Diff.Differentiator()
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
 KP_THETA_X = 7.0    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 7.0                                   # Adjust until the system balances
+KP_THETA_Y = 7.0                                  # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
+KP_v = 0.05
+vx_pid = PID(KP_v,0,0.002,DT)
+vy_pid = PID(KP_v,0,0.002,DT)
+vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
+vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
@@ -269,6 +292,17 @@ J32 = J31
 J33 = J31
 
 J = np.array([[J11, J12, J13], [J21, J22, J23], [J31, J32, J33]])
+
+beta = np.pi/2,np.pi/2+np.pi*2/3,np.pi/2+np.pi*4/3
+IK = np.zeros((3,3))
+for i in range (0,3):
+        IK[i][0]=RK/RW*-np.cos(ALPHA)*np.cos(beta[i]) #Rx component to ith wheel
+        IK[i][1]=RK/RW*-np.cos(ALPHA)*np.sin(beta[i]) #Ry
+        IK[i][2]=RK/RW*np.sin(ALPHA)
+#tentatively, seems like linear velocity of wheels is x to y when positive.
+FK = np.linalg.inv(IK)
+
+
 
 # ---------------------------------------------------------------------------
 
@@ -331,6 +365,16 @@ def compute_phi(psi_1, psi_2, psi_3):
     # returns phi_x, phi_y, phi_z
     return phi[0][0], phi[1][0], phi[2][0]
 
+def transform_w2b(m1, m2, m3):
+    """
+    Returns Phi attributes
+    """
+
+    x = 0.323899 * m2 - 0.323899 * m3
+    y = -0.374007 * m1 + 0.187003 * m2 + 0.187003 * m3
+    z = 0.187003 * m1 + 0.187003 * m2 + 0.187003 * m3
+
+    return x, y, z
 
 
 if __name__ == "__main__":
@@ -411,22 +455,49 @@ if __name__ == "__main__":
         psi_2 = states['psi_2']
         psi_3 = states['psi_3']
 
-        psi_1f = lowpass_psi1.filter(psi_1)
-        psi_2f = lowpass_psi1.filter(psi_2)
-        psi_3f = lowpass_psi1.filter(psi_3)
+        dpsi1 = states['dpsi_1']
+        dpsi2 = states['dpsi_2']
+        dpsi3 = states['dpsi_3']
 
-        dpsi_1f = psi1Diff.differentiate(psi_1f)
-        dpsi_2f = psi1Diff.differentiate(psi_2f)
-        dpsi_3f = psi1Diff.differentiate(psi_3f)
+        dpsi_1f = lowpass_psi1.filter(dpsi1)
+        dpsi_2f = lowpass_psi2.filter(dpsi2)
+        dpsi_3f = lowpass_psi3.filter(dpsi3)
+
+        # #= psi1Diff.differentiate(psi_1f)
+        #dpsi_2f #= psi1Diff.differentiate(psi_2f)
+        #dpsi_3f #= psi1Diff.differentiate(psi_3f)
+
 
         # Body lean angles
         theta_x = (states['theta_roll'])+np.deg2rad(rob311_bt_controller.y_trim_count*0.05)
         theta_y = (states['theta_pitch'])-np.deg2rad(rob311_bt_controller.x_trim_count*0.05)
 
-        # Controller error terms
-        error_x = desired_theta_x-np.deg2rad(4*rob311_bt_controller.y_cmd) - theta_x
-        error_y = desired_theta_y+np.deg2rad(4*rob311_bt_controller.tz_demo_2) - theta_y
+        phi_x, phi_y, phi_z = transform_w2b(psi_1,psi_2,psi_3)
+        dphi_x,dphi_y,dphi_z = transform_w2b(dpsi1,dpsi2,dpsi3)
+        
+        dtheta_x = thetaxDiff.differentiate(theta_x)
+        dtheta_y = thetayDiff.differentiate(theta_y)
 
+        dphi_xf = lowpass_dphix.filter(dphi_x) # angular velocity of ball relative to ground
+        dphi_yf = lowpass_dphiy.filter(dphi_y)
+
+        
+
+        xCommand = -np.deg2rad(4*rob311_bt_controller.y_cmd)
+        yCommand = np.deg2rad(4*rob311_bt_controller.tz_demo_2)
+
+        if(velocityControl):
+            phi_ycmd = vy_pid.setpoint = yCommand*15
+            phi_xcmd = vx_pid.setpoint = xCommand*15
+            desired_theta_x = vx_pid(dphi_xf)
+            desired_theta_y = vy_pid(dphi_yf)
+        else:
+            desired_theta_x = xCommand
+            desired_theta_y = yCommand
+
+        # Controller error terms
+        error_x = desired_theta_x - theta_x
+        error_y = desired_theta_y - theta_y
         # ---------------------------------------------------------
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
@@ -442,11 +513,12 @@ if __name__ == "__main__":
         dEffortY = 0
         
         if(usePID):
-            x_pid.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd)
-            y_pid.setpoint = desired_theta_y+np.deg2rad(2*rob311_bt_controller.tz_demo_2)
+            x_pid.setpoint = desired_theta_x
+            y_pid.setpoint = desired_theta_y
 
-            dEffortX = x_pid(theta_xfd)*(1+np.abs(np.sin(theta_x)))
-            dEffortY = y_pid(theta_yfd)*(1+np.abs(np.sin(theta_y)))
+            dEffortX = x_pid(theta_xfd)#*(1+np.abs(np.sin(theta_x)))
+            dEffortY = y_pid(theta_yfd)#*(1+np.abs(np.sin(theta_y)))
+            
 
             pEffortX = KP_THETA_X * error_x
             pEffortY = KP_THETA_Y * error_y
@@ -476,7 +548,22 @@ if __name__ == "__main__":
        # if np.hypot(theta_x,theta_y) > MAX_LEAN:
        #     Tx = 0
        #     Ty = 0
-        
+        T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
+        T1raw = T1
+        T2raw = T2
+        T3raw = T3
+
+
+        phiCmd=np.array([[phi_xcmd],[phi_ycmd],[0]])
+        psiTranslation=np.matmul(FK,phiCmd)
+
+        ff1 = psiTranslation[0][0]*emf
+        ff2 = psiTranslation[1][0]*emf
+        ff3 = psiTranslation[2][0]*emf
+
+        T1 += ff1
+        T2 += ff2
+        T3 += ff3
 
         # ---------------------------------------------------------
         if(compensateBackEmf):
@@ -495,15 +582,13 @@ if __name__ == "__main__":
 
             e = np.average([e1,e2,e3])
 
-            T1*=(1+e)
-            T2*=(1+e)
-            T3*=(1+e)
+            T1*=np.max([(1+e),0])
+            T2*=np.max([(1+e),0])
+            T3*=np.max([(1+e),0])
         #----------------------------------------------------
 
-        T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
-        T1raw = T1
-        T2raw = T2
-        T3raw = T3
+        
+      
         largestTorque = np.max([np.abs(T1),np.abs(T2),np.abs(T3)])
 
         if(largestTorque>0.99):
@@ -515,7 +600,8 @@ if __name__ == "__main__":
         
         # ---------------------------------------------------------
 
-        phi_x, phi_y, phi_z = compute_phi(psi_1, psi_2, psi_3)
+        
+        #compute_phi(psi_1, psi_2, psi_3)
 
         # ---------------------------------------------------------
 
@@ -528,10 +614,10 @@ if __name__ == "__main__":
         data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
         dl.appendData(data)
 
-        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY]
+        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY] + [x_pid.setpoint] + [y_pid.setpoint] +[phi_xcmd] +[phi_ycmd]
         effortLogger.appendData(effort)
 
-        filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd]
+        filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]
         filterLogger.appendData(filtering)
 
         print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
