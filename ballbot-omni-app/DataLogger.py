@@ -7,11 +7,12 @@ dgonz@mit.edu
 import numpy
 
 class dataLogger():
-    myData = []
+    
 
     def __init__(self, name):
         self.name = name
         f = open(name, 'w')
+        self.myData = []
     
     def writeOut(self):
         print('Storing data...\n')

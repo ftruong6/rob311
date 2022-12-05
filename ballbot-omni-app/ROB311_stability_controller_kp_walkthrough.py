@@ -410,10 +410,10 @@ if __name__ == "__main__":
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
-        heta_xfd=lowpass_filter_x.filter(theta_x)
+        #theta_xfd=lowpass_filter_x.filter(theta_x)
         #theta_yfd=lowpass_filter_x.filter(theta_y)
-        #theta_xfd = 0
-        #theta_yfd = 0
+        theta_xfd = 0
+        theta_yfd = 0
 
         pEffortX = 0
         pEffortY = 0
