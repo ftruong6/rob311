@@ -9,6 +9,7 @@ from DataLogger import dataLogger
 import ps4_controller_api as ps4
 import FIR as fir
 import LPFS as lpfs
+import differentiator as Diff
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -200,13 +201,16 @@ ALPHA = np.deg2rad(45)
 MAX_PLANAR_DUTY = 0.75 #0.8
 MAX_LEAN = np.deg2rad(10)
 
+emf = 0.0636942675159
+
 usePID = True
-useFIR = True
+useFIR = False
+compensateBackEmf = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
 Fs = FREQ # Sampling rate in Hz
-Fc = 1.0 # Cut-off frequency of the filter in Hz
+Fc = 150.0 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating.
 
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
@@ -222,17 +226,24 @@ else:
     lowpass_filter_y = lpfs.LPFS()
     lowpass_filter_y.estimateGains(Fc,0.5)
 
+    lowpass_psi1 =  lpfs.LPFS()
+    lowpass_psi1.estimateGains(Fc,0.5)
+    lowpass_psi2 =  lpfs.LPFS()
+    lowpass_psi2.estimateGains(Fc,0.5)
+    lowpass_psi3 =  lpfs.LPFS()
+    lowpass_psi3.estimateGains(Fc,0.5)
 
-
-
+psi1Diff = Diff.Differentiator()
+psi2Diff = Diff.Differentiator()
+psi3Diff = Diff.Differentiator()
 # ---------------------------------------------------------------------------
 ###############  THESE WILL NEED TO BE CAREFULLY ADJUSTED ##################
 # --------------------------------------------------------------------------
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 8    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 8                                   # Adjust until the system balances
+KP_THETA_X = 7.0    #7.5   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 7.0                                   # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
@@ -240,8 +251,8 @@ KP_THETA_Y = 8                                   # Adjust until the system balan
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
     y_pid = PID(0, 0, 0, DT) #0.1
-    x_pid.Kd = 0.5
-    y_pid.Kd = 0.5
+    x_pid.Kd = 0.2
+    y_pid.Kd = 0.2
 
 
 # Wheel rotation to Ball rotation transformation matrix
@@ -377,8 +388,10 @@ if __name__ == "__main__":
 
     print('Beginning program!')
     i = 0
-    rob311_bt_controller.y_trim_count = 16   #36
-    rob311_bt_controller.x_trim_count = -3    #4
+    rob311_bt_controller.y_trim_count = 41   #36
+    rob311_bt_controller.x_trim_count = 6    #4
+
+    
 
     for t in SoftRealtimeLoop(dt=DT, report=True):
         try:
@@ -398,6 +411,14 @@ if __name__ == "__main__":
         psi_2 = states['psi_2']
         psi_3 = states['psi_3']
 
+        psi_1f = lowpass_psi1.filter(psi_1)
+        psi_2f = lowpass_psi1.filter(psi_2)
+        psi_3f = lowpass_psi1.filter(psi_3)
+
+        dpsi_1f = psi1Diff.differentiate(psi_1f)
+        dpsi_2f = psi1Diff.differentiate(psi_2f)
+        dpsi_3f = psi1Diff.differentiate(psi_3f)
+
         # Body lean angles
         theta_x = (states['theta_roll'])+np.deg2rad(rob311_bt_controller.y_trim_count*0.05)
         theta_y = (states['theta_pitch'])-np.deg2rad(rob311_bt_controller.x_trim_count*0.05)
@@ -410,10 +431,10 @@ if __name__ == "__main__":
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
-        #theta_xfd=lowpass_filter_x.filter(theta_x)
-        #theta_yfd=lowpass_filter_x.filter(theta_y)
-        theta_xfd = 0
-        theta_yfd = 0
+        theta_xfd=lowpass_filter_x.filter(theta_x)
+        theta_yfd=lowpass_filter_x.filter(theta_y)
+        #theta_xfd = 0
+        #theta_yfd = 0
 
         pEffortX = 0
         pEffortY = 0
@@ -424,8 +445,8 @@ if __name__ == "__main__":
             x_pid.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd)
             y_pid.setpoint = desired_theta_y+np.deg2rad(2*rob311_bt_controller.tz_demo_2)
 
-            dEffortX = x_pid(theta_xfd)
-            dEffortY = y_pid(theta_yfd)
+            dEffortX = x_pid(theta_xfd)*(1+np.abs(np.sin(theta_x)))
+            dEffortY = y_pid(theta_yfd)*(1+np.abs(np.sin(theta_y)))
 
             pEffortX = KP_THETA_X * error_x
             pEffortY = KP_THETA_Y * error_y
@@ -458,6 +479,26 @@ if __name__ == "__main__":
         
 
         # ---------------------------------------------------------
+        if(compensateBackEmf):
+            if(T1!=0):
+                e1 = dpsi_1f*emf/T1
+            else:
+                e1 = 0
+            if(T2!=0):
+                e2 = dpsi_2f*emf/T2
+            else:
+                e2 = 0
+            if(T3!=0):
+                e3 = dpsi_3f*emf/T3
+            else:
+                e3 = 0
+
+            e = np.average([e1,e2,e3])
+
+            T1*=(1+e)
+            T2*=(1+e)
+            T3*=(1+e)
+        #----------------------------------------------------
 
         T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
         T1raw = T1
