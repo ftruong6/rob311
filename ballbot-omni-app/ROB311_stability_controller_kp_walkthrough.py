@@ -8,7 +8,7 @@ from MBot.SerialProtocol.protocol import SerialProtocol
 from DataLogger import dataLogger
 import ps4_controller_api as ps4
 import FIR as fir
-import LPFS as LPFS
+import LPFS as lpfs
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -135,7 +135,7 @@ class SoftRealtimeLoop:
                     [signal.SIGTERM, signal.SIGINT, signal.SIGHUP], 0
                 ):
                     self.stop()
-            self.t1 += d
+            self.t1 += dt
         print("Soft realtime loop has ended successfully.")
 
     def stop(self):
@@ -200,16 +200,27 @@ ALPHA = np.deg2rad(45)
 MAX_PLANAR_DUTY = 0.75 #0.8
 MAX_LEAN = np.deg2rad(10)
 
-usePID = False
-
+usePID = True
+useFIR = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
+Fs = FREQ # Sampling rate in Hz
+Fc = 1.0 # Cut-off frequency of the filter in Hz
 
-lowpass_filter_x = LPFS.LPFS()
-lowpass_filter_x.estimateGains(np.pi*2*10,0.5)
-lowpass_filter_y = LPFS.LPFS()
-lowpass_filter_y.estimateGains(np.pi*2*10,0.5)
+Fn = Fc/Fs # Normalized equivalent of Fc
+N = 60 # Taps of the filter
+
+if(useFIR):
+    lowpass_filter_x = fir.FIR()
+    lowpass_filter_x.lowpass(N, Fn)
+    lowpass_filter_y = fir.FIR()
+    lowpass_filter_y.lowpass(N, Fn)
+else:
+    lowpass_filter_x = lpfs.LPFS()
+    lowpass_filter_x.estimateGains(Fc,0.5)
+    lowpass_filter_y = lpfs.LPFS()
+    lowpass_filter_y.estimateGains(Fc,0.5)
 
 
 
@@ -220,18 +231,17 @@ lowpass_filter_y.estimateGains(np.pi*2*10,0.5)
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 8.5   #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 8.5     
-KD = 0.2                            # Adjust until the system balances
+KP_THETA_X = 8    #7.5   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 8                                   # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
 
 if(usePID):
-    x_pidf = PID(0.0, 0.0, 0.0, DT) #0.1  tall 
-    y_pidf = PID(0.0, 0.0, 0.0, DT) #0.1
-    x_pidf.Kd = 0.5  #1.4
-    y_pidf.Kd = 0.5  
+    x_pid = PID(0, 0, 0, DT) #0.1  tall 
+    y_pid = PID(0, 0, 0, DT) #0.1
+    x_pid.Kd = 0.5
+    y_pid.Kd = 0.5
 
 
 # Wheel rotation to Ball rotation transformation matrix
@@ -312,11 +322,15 @@ def compute_phi(psi_1, psi_2, psi_3):
 
 
 
-
 if __name__ == "__main__":
     trial_num = int(input('Trial Number? '))
-    filename = 'ROB311_Stability_Test_%i' % trial_num
+    filename = 'ROB311_Stability_states%i' % trial_num
+    filename2 = 'ROB311_Stability_effort%i' % trial_num
+    filename3 = 'ROB311_Stability_filter%i' % trial_num
     dl = dataLogger(filename + '.txt')
+    effortLogger = dataLogger(filename2 + '.txt')
+    filterLogger = dataLogger(filename3 + '.txt')
+    
 
     ser_dev = SerialProtocol()
     register_topics(ser_dev)
@@ -327,6 +341,7 @@ if __name__ == "__main__":
     rob311_bt_controller_thread.daemon = True
 
     rob311_bt_controller_thread.start()
+
 
     # Init serial
     serial_read_thread = Thread(target = SerialProtocol.read_loop, args=(ser_dev,), daemon=True)
@@ -365,8 +380,6 @@ if __name__ == "__main__":
     rob311_bt_controller.y_trim_count = 16   #36
     rob311_bt_controller.x_trim_count = -3    #4
 
-    lowpass_filter_y.reset(0)
-    lowpass_filter_x.reset(0)
     for t in SoftRealtimeLoop(dt=DT, report=True):
         try:
             states = ser_dev.get_cur_topic_data(121)[0]
@@ -386,56 +399,79 @@ if __name__ == "__main__":
         psi_3 = states['psi_3']
 
         # Body lean angles
-        theta_x = (states['theta_roll'])
-        theta_y = (states['theta_pitch'])
-
-       
+        theta_x = (states['theta_roll'])+np.deg2rad(rob311_bt_controller.y_trim_count*0.05)
+        theta_y = (states['theta_pitch'])-np.deg2rad(rob311_bt_controller.x_trim_count*0.05)
 
         # Controller error terms
-        error_x = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05) - theta_x
-        error_y = desired_theta_y+np.deg2rad(2*rob311_bt_controller.tz_demo_2+rob311_bt_controller.x_trim_count*0.05) - theta_y
+        error_x = desired_theta_x-np.deg2rad(4*rob311_bt_controller.y_cmd) - theta_x
+        error_y = desired_theta_y+np.deg2rad(4*rob311_bt_controller.tz_demo_2) - theta_y
 
         # ---------------------------------------------------------
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
+        heta_xfd=lowpass_filter_x.filter(theta_x)
+        #theta_yfd=lowpass_filter_x.filter(theta_y)
+        #theta_xfd = 0
+        #theta_yfd = 0
 
-        theta_x=lowpass_filter_x.filter(theta_x)
-        theta_y=lowpass_filter_y.filter(theta_y)
-     
+        pEffortX = 0
+        pEffortY = 0
+        dEffortX = 0
+        dEffortY = 0
         
         if(usePID):
-            x_pidf.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd+rob311_bt_controller.y_trim_count*0.05)
-            y_pidf.setpoint = desired_theta_y+np.deg2rad(2*rob311_bt_controller.tz_demo_2+rob311_bt_controller.x_trim_count*0.05)
+            x_pid.setpoint = desired_theta_x-np.deg2rad(2*rob311_bt_controller.y_cmd)
+            y_pid.setpoint = desired_theta_y+np.deg2rad(2*rob311_bt_controller.tz_demo_2)
 
-            Tx = x_pidf(theta_x) + KP_THETA_X * error_x
-            Ty = y_pidf(theta_y) + KP_THETA_Y * error_y
-           
+            dEffortX = x_pid(theta_xfd)
+            dEffortY = y_pid(theta_yfd)
+
+            pEffortX = KP_THETA_X * error_x
+            pEffortY = KP_THETA_Y * error_y
+            Tx = dEffortX+ pEffortX
+            Ty = dEffortY+ pEffortY
         else:
-            Tx = KP_THETA_X * error_x - KD*lowpass_filter_x.x2prev
-            Ty = KP_THETA_Y * error_y - KD*lowpass_filter_y.x2prev
+            Tx = KP_THETA_X * error_x
+            Ty = KP_THETA_Y * error_y
 
-        Tz = rob311_bt_controller.tz_demo_3*0.3 
-        #Tz= rob311_bt_controller.turn*0.3
+        #Tz = rob311_bt_controller.tz_demo_2*0.3
+        Tz=0
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
         # This keeps the system having the correct torque balance across the wheels in the face of saturation of any motor during the conversion from planar torques to M1-M3
-        if np.abs(Tx) > MAX_PLANAR_DUTY:
-            Tx = np.sign(Tx) * MAX_PLANAR_DUTY
+        
+        #maxXDuty = np.max([(1-np.abs(3*np.sin(theta_x))),0])
+        #maxYDuty = np.max([(1-np.abs(3*np.sin(theta_y))),0])
+        #maxDuty = np.hypot(maxXDuty,maxYDuty)*MAX_PLANAR_DUTY
 
-        if np.abs(Ty) > MAX_PLANAR_DUTY:
-            Ty = np.sign(Ty) * MAX_PLANAR_DUTY
+
+        #if np.hypot(np.abs(Tx),np.abs(Ty)) > maxDuty:
+           # Tx = Tx/maxDuty
+           # Ty = Ty/maxDuty
+        
 
        # if np.hypot(theta_x,theta_y) > MAX_LEAN:
        #     Tx = 0
        #     Ty = 0
-
+        
 
         # ---------------------------------------------------------
 
         T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
+        T1raw = T1
+        T2raw = T2
+        T3raw = T3
+        largestTorque = np.max([np.abs(T1),np.abs(T2),np.abs(T3)])
 
+        if(largestTorque>0.99):
+            T1/=(largestTorque*1.1)
+            T2/=(largestTorque*1.1)
+            T3/=(largestTorque*1.1)
+        
+
+        
         # ---------------------------------------------------------
 
         phi_x, phi_y, phi_z = compute_phi(psi_1, psi_2, psi_3)
@@ -448,14 +484,22 @@ if __name__ == "__main__":
         commands['motor_3_duty'] = T3  
 
         # Construct the data matrix for saving - you can add more variables by replicating the format below
-        data = [i] + [t_now] + [states['theta_roll']] + [states['theta_pitch']] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3] + [theta_x] + [theta_y]
+        data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
         dl.appendData(data)
+
+        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY]
+        effortLogger.appendData(effort)
+
+        filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd]
+        filterLogger.appendData(filtering)
 
         print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
         ser_dev.send_topic_data(101, commands) # Send motor torques
 
   
     dl.writeOut()
+    effortLogger.writeOut()
+    filterLogger.writeOut()
 
     print("Resetting Motor commands.")
     print("y_trim: ")
