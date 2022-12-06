@@ -201,22 +201,23 @@ RK = 0.1210
 ALPHA = np.deg2rad(45)
 
 MAX_PLANAR_DUTY = 0.75 #0.8  
-MAX_LEAN = np.deg2rad(4)   #prev 10
+MAX_LEAN = np.deg2rad(3)   #prev 10
 
 
-emf = 0.0636942675159*0.8
+emf = 0.0636942675159*0.94
 
 usePID = True
 useFIR = False
-compensateBackEmf = True#bad feature :(
+compensateBackEmf = True#bad feature :( actually good now
 velocityControl = True
 feedForward = False  #also bad
+logData = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
 Fs = FREQ # Sampling rate in Hz
 Fc = 170 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
-Fc_psi = 20  #tried 0.3.... not sure.
+Fc_psi = 10  #tried 0.3.... not sure.
 Fc_phi = 20   #good is 7-8  20 also works with decreased kp, and works super good
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
@@ -265,9 +266,9 @@ ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
 xRamp = Diff.SlewRateLimiter()
-xRamp.maxDerivative = 3 #1.5
+xRamp.maxDerivative = 2.4 #1.5
 yRamp = Diff.SlewRateLimiter()
-yRamp.maxDerivative = 3 #1.5 works conservatively
+yRamp.maxDerivative = 2.4 #1.5 works conservatively
 
 
 # ---------------------------------------------------------------------------
@@ -276,12 +277,12 @@ yRamp.maxDerivative = 3 #1.5 works conservatively
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 7.0    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 7.0                                  # Adjust until the system balances
+KP_THETA_X = 7.2    #7.5   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 7.2                                  # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.02   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
+KP_v = 0.024   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
 vx_pid = PID(KP_v,0,0.001,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.001,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
@@ -292,7 +293,7 @@ if(usePID):
     y_pid = PID(0, 0, 0, DT) #0.1
     x_pid.Kd = 0.2
     y_pid.Kd = 0.2
-    z_pid = PID(0.1,0,0,DT)
+    z_pid = PID(0.16,0,0.01,DT)
     z_pid.output_limits = (-1,1)
 
 
@@ -396,13 +397,14 @@ def transform_w2b(m1, m2, m3):
 
 
 if __name__ == "__main__":
-    trial_num = int(input('Trial Number? '))
-    filename = 'ROB311_Stability_states%i' % trial_num
-    filename2 = 'ROB311_Stability_effort%i' % trial_num
-    filename3 = 'ROB311_Stability_filter%i' % trial_num
-    dl = dataLogger(filename + '.txt')
-    effortLogger = dataLogger(filename2 + '.txt')
-    filterLogger = dataLogger(filename3 + '.txt')
+    if(logData):
+        trial_num = int(input('Trial Number? '))
+        filename = 'ROB311_Stability_states%i' % trial_num
+        filename2 = 'ROB311_Stability_effort%i' % trial_num
+        filename3 = 'ROB311_Stability_filter%i' % trial_num
+        dl = dataLogger(filename + '.txt')
+        effortLogger = dataLogger(filename2 + '.txt')
+        filterLogger = dataLogger(filename3 + '.txt')
     
 
     ser_dev = SerialProtocol()
@@ -555,9 +557,12 @@ if __name__ == "__main__":
             Ty = KP_THETA_Y * error_y
 
         #Tz = -2.5*(rob311_bt_controller.lx)**3
-        desired_z = 10*(rob311_bt_controller.lx)**3
-        z_pid.setpoint = desired_z
-        Tz= -z_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
+        desired_z = (rob311_bt_controller.lx)**3
+        if(compensateBackEmf):
+            z_pid.setpoint = desired_z*10
+            Tz= -z_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
+        else:
+            Tz = -desired_z*2.5
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -584,13 +589,17 @@ if __name__ == "__main__":
         T3raw = T3
 
         
+        if(feedForward):   
+            phiCmd=np.array([[phi_xcmd],[phi_ycmd],[0]])
+            psiTranslation=np.matmul(FK,phiCmd)
             
-        phiCmd=np.array([[phi_xcmd],[phi_ycmd],[0]])
-        psiTranslation=np.matmul(FK,phiCmd)
-
-        ff1 = psiTranslation[0][0]*emf
-        ff2 = psiTranslation[1][0]*emf
-        ff3 = psiTranslation[2][0]*emf
+            ff1 = psiTranslation[0][0]*emf
+            ff2 = psiTranslation[1][0]*emf
+            ff3 = psiTranslation[2][0]*emf
+        else:
+            ff1 = 0
+            ff2 = 0
+            ff3 = 0
 
         #FEEDFORWARD
         if(feedForward):
@@ -650,22 +659,23 @@ if __name__ == "__main__":
         commands['motor_3_duty'] = T3  
 
         # Construct the data matrix for saving - you can add more variables by replicating the format below
-        data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
-        dl.appendData(data)
+        if(logData):
+            data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
+            dl.appendData(data)
 
-        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY] + [x_pid.setpoint] + [y_pid.setpoint] +[phi_xcmd] +[phi_ycmd] +[ff1] + [ff2]+[ff3]
-        effortLogger.appendData(effort)
+            effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY] + [x_pid.setpoint] + [y_pid.setpoint] +[phi_xcmd] +[phi_ycmd] +[ff1] + [ff2]+[ff3]
+            effortLogger.appendData(effort)
 
-        filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]
-        filterLogger.appendData(filtering)
+            filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]
+            filterLogger.appendData(filtering)
 
         print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
         ser_dev.send_topic_data(101, commands) # Send motor torques
 
-  
-    dl.writeOut()
-    effortLogger.writeOut()
-    filterLogger.writeOut()
+    if(logData):
+        dl.writeOut()
+        effortLogger.writeOut()
+        filterLogger.writeOut()
 
     print("Resetting Motor commands.")
     print("y_trim: ")
