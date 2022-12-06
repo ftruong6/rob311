@@ -10,6 +10,8 @@ import ps4_controller_api as ps4
 import FIR as fir
 import LPFS as lpfs
 import differentiator as Diff
+
+
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -206,17 +208,19 @@ emf = 0.0636942675159
 
 usePID = True
 useFIR = False
-compensateBackEmf = False #bad feature :(
+compensateBackEmf = False#bad feature :(
 velocityControl = True
+feedForward = False  #also bad
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
 Fs = FREQ # Sampling rate in Hz
 Fc = 170 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
-Fc_psi = 1
-Fc_phi = 8
+Fc_psi = 0.3
+Fc_phi = 20   #good is 7-8  20 also works with decreased kp, and works super good
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
+
 
 if(useFIR):
     lowpass_filter_x = fir.FIR()
@@ -254,6 +258,18 @@ thetayDiff = Diff.Differentiator()
 psi1Diff = Diff.Differentiator()
 psi2Diff = Diff.Differentiator()
 psi3Diff = Diff.Differentiator()
+
+ffxRamp = Diff.SlewRateLimiter()
+ffxRamp.maxDerivative = 0.1
+ffyRamp = Diff.SlewRateLimiter()
+ffyRamp.maxDerivative = 0.1
+
+xRamp = Diff.SlewRateLimiter()
+xRamp.maxDerivative = 2.0
+yRamp = Diff.SlewRateLimiter()
+yRamp.maxDerivative = 2.0
+
+
 # ---------------------------------------------------------------------------
 ###############  THESE WILL NEED TO BE CAREFULLY ADJUSTED ##################
 # --------------------------------------------------------------------------
@@ -265,9 +281,9 @@ KP_THETA_Y = 7.0                                  # Adjust until the system bala
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.05
-vx_pid = PID(KP_v,0,0.002,DT)
-vy_pid = PID(KP_v,0,0.002,DT)
+KP_v = 0.025   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
+vx_pid = PID(KP_v,0,0.001,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
+vy_pid = PID(KP_v,0,0.001,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 
@@ -294,13 +310,13 @@ J33 = J31
 J = np.array([[J11, J12, J13], [J21, J22, J23], [J31, J32, J33]])
 
 beta = np.pi/2,np.pi/2+np.pi*2/3,np.pi/2+np.pi*4/3
-IK = np.zeros((3,3))
+FK = np.zeros((3,3))
 for i in range (0,3):
-        IK[i][0]=RK/RW*-np.cos(ALPHA)*np.cos(beta[i]) #Rx component to ith wheel
-        IK[i][1]=RK/RW*-np.cos(ALPHA)*np.sin(beta[i]) #Ry
-        IK[i][2]=RK/RW*np.sin(ALPHA)
+        FK[i][0]=RK/RW*-np.cos(ALPHA)*np.cos(beta[i]) #Rx component to ith wheel
+        FK[i][1]=RK/RW*-np.cos(ALPHA)*np.sin(beta[i]) #Ry
+        FK[i][2]=RK/RW*np.sin(ALPHA)
 #tentatively, seems like linear velocity of wheels is x to y when positive.
-FK = np.linalg.inv(IK)
+IK = np.linalg.inv(FK)
 
 
 
@@ -434,6 +450,7 @@ if __name__ == "__main__":
     i = 0
     rob311_bt_controller.y_trim_count = 41   #36
     rob311_bt_controller.x_trim_count = 6    #4
+    
 
     
 
@@ -485,10 +502,16 @@ if __name__ == "__main__":
 
         xCommand = -np.deg2rad(4*rob311_bt_controller.y_cmd)
         yCommand = np.deg2rad(4*rob311_bt_controller.tz_demo_2)
-
+        
         if(velocityControl):
-            phi_ycmd = vy_pid.setpoint = yCommand*15
-            phi_xcmd = vx_pid.setpoint = xCommand*15
+            phi_ycmd =  xCommand*40  #around 1 radian max, when 15
+            phi_xcmd =  yCommand*40
+
+            phi_xcmd = xRamp.limit(phi_xcmd)
+            phi_ycmd = yRamp.limit(phi_ycmd)
+
+            vy_pid.setpoint = phi_xcmd
+            vx_pid.setpoint = phi_ycmd
             desired_theta_x = vx_pid(dphi_xf)
             desired_theta_y = vy_pid(dphi_yf)
         else:
@@ -528,8 +551,8 @@ if __name__ == "__main__":
             Tx = KP_THETA_X * error_x
             Ty = KP_THETA_Y * error_y
 
-        #Tz = rob311_bt_controller.tz_demo_2*0.3
-        Tz=0
+        Tz = -rob311_bt_controller.lx
+        #Tz=0
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -548,12 +571,15 @@ if __name__ == "__main__":
        # if np.hypot(theta_x,theta_y) > MAX_LEAN:
        #     Tx = 0
        #     Ty = 0
+
+        #T1,T2,T3 = 0,0,0
         T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
         T1raw = T1
         T2raw = T2
         T3raw = T3
 
-
+        
+            
         phiCmd=np.array([[phi_xcmd],[phi_ycmd],[0]])
         psiTranslation=np.matmul(FK,phiCmd)
 
@@ -561,9 +587,11 @@ if __name__ == "__main__":
         ff2 = psiTranslation[1][0]*emf
         ff3 = psiTranslation[2][0]*emf
 
-        T1 += ff1
-        T2 += ff2
-        T3 += ff3
+        #FEEDFORWARD
+        if(feedForward):
+            T1 += ff1
+            T2 += ff2
+            T3 += ff3
 
         # ---------------------------------------------------------
         if(compensateBackEmf):
@@ -614,7 +642,7 @@ if __name__ == "__main__":
         data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
         dl.appendData(data)
 
-        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY] + [x_pid.setpoint] + [y_pid.setpoint] +[phi_xcmd] +[phi_ycmd]
+        effort = [i]+ [t_now]+ [Tx] + [Ty] + [Tz] +[T1] + [T2] + [T3] +[T1raw]+[T2raw]+[T3raw] + [pEffortX] +[pEffortY] +[dEffortX] +[dEffortY] + [x_pid.setpoint] + [y_pid.setpoint] +[phi_xcmd] +[phi_ycmd] +[ff1] + [ff2]+[ff3]
         effortLogger.appendData(effort)
 
         filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]

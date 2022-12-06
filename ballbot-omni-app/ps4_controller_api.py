@@ -194,6 +194,9 @@ class ROB311BTController(Controller):
         self.y_trim_count = 0
         self.x_trim_count = 0
 
+        self.ly = 0.0
+        self.lx = 0.0
+
         # ------------------------------------
 
     # Continuous value with Triggers
@@ -213,6 +216,19 @@ class ROB311BTController(Controller):
     def on_L2_release(self):
         # Reset values
         self.tz_demo_1 = 0.0
+    def on_L3_up(self, value):
+        # Inverting y-axis value
+        self.ly = -1.0 * value/JOYSTICK_SCALE
+
+    def on_L3_down(self, value):
+        # Inverting y-axis value
+        self.ly = -1.0 * value/JOYSTICK_SCALE
+    
+    def on_L3_left(self, value):
+        self.lx =1.0*value/JOYSTICK_SCALE
+    def on_L3_right(self, value):
+        self.lx =1.0*value/JOYSTICK_SCALE
+
 
     # ----------------------------------------
     # Continuous value with Right Thumbstick (UP/DOWN)
