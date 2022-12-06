@@ -204,11 +204,11 @@ MAX_PLANAR_DUTY = 0.75 #0.8
 MAX_LEAN = np.deg2rad(4)   #prev 10
 
 
-emf = 0.0636942675159
+emf = 0.0636942675159*0.8
 
 usePID = True
 useFIR = False
-compensateBackEmf = False#bad feature :(
+compensateBackEmf = True#bad feature :(
 velocityControl = True
 feedForward = False  #also bad
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ feedForward = False  #also bad
 
 Fs = FREQ # Sampling rate in Hz
 Fc = 170 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
-Fc_psi = 0.3
+Fc_psi = 20  #tried 0.3.... not sure.
 Fc_phi = 20   #good is 7-8  20 also works with decreased kp, and works super good
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
@@ -242,11 +242,11 @@ else:
     lowpass_filter_y.estimateGains(Fc,0.5)
 
     lowpass_psi1 =  lpfs.LPFS()
-    lowpass_psi1.estimateGains(Fc_psi,0.5)
+    lowpass_psi1.estimateGains(Fc_psi,20)
     lowpass_psi2 =  lpfs.LPFS()
-    lowpass_psi2.estimateGains(Fc_psi,0.5)
+    lowpass_psi2.estimateGains(Fc_psi,20)
     lowpass_psi3 =  lpfs.LPFS()
-    lowpass_psi3.estimateGains(Fc_psi,0.5)
+    lowpass_psi3.estimateGains(Fc_psi,20)
 
 lowpass_dphix = lpfs.LPFS()
 lowpass_dphix.estimateGains(Fc_phi,2)
@@ -265,9 +265,9 @@ ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
 xRamp = Diff.SlewRateLimiter()
-xRamp.maxDerivative = 2.0
+xRamp.maxDerivative = 3 #1.5
 yRamp = Diff.SlewRateLimiter()
-yRamp.maxDerivative = 2.0
+yRamp.maxDerivative = 3 #1.5 works conservatively
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ KP_THETA_Y = 7.0                                  # Adjust until the system bala
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.025   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
+KP_v = 0.02   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
 vx_pid = PID(KP_v,0,0.001,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.001,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
@@ -292,6 +292,8 @@ if(usePID):
     y_pid = PID(0, 0, 0, DT) #0.1
     x_pid.Kd = 0.2
     y_pid.Kd = 0.2
+    z_pid = PID(0.1,0,0,DT)
+    z_pid.output_limits = (-1,1)
 
 
 # Wheel rotation to Ball rotation transformation matrix
@@ -422,6 +424,7 @@ if __name__ == "__main__":
     commands = np.zeros(1, dtype=mo_cmds_dtype)[0]
     states = np.zeros(1, dtype=mo_states_dtype)[0]
 
+
     psi_1 = 0.0
     psi_2 = 0.0
     psi_3 = 0.0
@@ -448,7 +451,7 @@ if __name__ == "__main__":
 
     print('Beginning program!')
     i = 0
-    rob311_bt_controller.y_trim_count = 41   #36
+    rob311_bt_controller.y_trim_count = 27   #36
     rob311_bt_controller.x_trim_count = 6    #4
     
 
@@ -504,8 +507,8 @@ if __name__ == "__main__":
         yCommand = np.deg2rad(4*rob311_bt_controller.tz_demo_2)
         
         if(velocityControl):
-            phi_ycmd =  xCommand*40  #around 1 radian max, when 15
-            phi_xcmd =  yCommand*40
+            phi_ycmd =  xCommand*60  #around 1 radian max, when 15
+            phi_xcmd =  yCommand*60
 
             phi_xcmd = xRamp.limit(phi_xcmd)
             phi_ycmd = yRamp.limit(phi_ycmd)
@@ -551,8 +554,10 @@ if __name__ == "__main__":
             Tx = KP_THETA_X * error_x
             Ty = KP_THETA_Y * error_y
 
-        Tz = -rob311_bt_controller.lx
-        #Tz=0
+        #Tz = -2.5*(rob311_bt_controller.lx)**3
+        desired_z = 10*(rob311_bt_controller.lx)**3
+        z_pid.setpoint = desired_z
+        Tz= -z_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -594,25 +599,31 @@ if __name__ == "__main__":
             T3 += ff3
 
         # ---------------------------------------------------------
+        impAvg = False
         if(compensateBackEmf):
-            if(T1!=0):
-                e1 = dpsi_1f*emf/T1
-            else:
-                e1 = 0
-            if(T2!=0):
-                e2 = dpsi_2f*emf/T2
-            else:
-                e2 = 0
-            if(T3!=0):
-                e3 = dpsi_3f*emf/T3
-            else:
-                e3 = 0
+            if(impAvg):
+                if(T1!=0):
+                    e1 = dpsi_1f*emf/T1
+                else:
+                    e1 = 0
+                if(T2!=0):
+                    e2 = dpsi_2f*emf/T2
+                else:
+                    e2 = 0
+                if(T3!=0):
+                    e3 = dpsi_3f*emf/T3
+                else:
+                    e3 = 0
 
-            e = np.average([e1,e2,e3])
+                e = np.average([e1,e2,e3])
 
-            T1*=np.max([(1+e),0])
-            T2*=np.max([(1+e),0])
-            T3*=np.max([(1+e),0])
+                T1*=np.max([(1+e),0])
+                T2*=np.max([(1+e),0])
+                T3*=np.max([(1+e),0])
+            else:
+                T1 += dpsi_1f*emf
+                T2 += dpsi_2f*emf
+                T3 += dpsi_3f*emf
         #----------------------------------------------------
 
         
