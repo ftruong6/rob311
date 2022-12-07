@@ -199,6 +199,8 @@ class ROB311BTController(Controller):
 
         self.ltrigger = 0.0
 
+        self.rtoggle = True
+
         # ------------------------------------
 
     # Continuous value with Triggers
@@ -276,7 +278,7 @@ class ROB311BTController(Controller):
     # Integer tz_demo_3s
 
     def on_R1_press(self):
-        print("R1 button pressed!")
+        self.rtoggle = not self.rtoggle
        
     def on_R1_release(self):
         pass

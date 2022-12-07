@@ -273,7 +273,7 @@ ffxRamp.maxDerivative = 0.1
 ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
-velRampJoy = 6
+velRampJoy = 4
 velRampTrig = 4
 xRamp = Diff.SlewRateLimiter()
 xRamp.maxDerivative = velRampJoy #1.5
@@ -303,7 +303,8 @@ if(usePID):
     y_pid = PID(0, 0, 0, DT) #0.1
     x_pid.Kd = 0.1#standard
     y_pid.Kd = 0.1  #0.
-    z_pid = PID(0.16,0,0.01,DT)
+    vz_pid = PID(0.16,0,0.01,DT) # velocity gains
+    z_pid = PID(0.4,0,0.08,DT)
     z_pid.output_limits = (-1,1)
 
 
@@ -468,6 +469,12 @@ if __name__ == "__main__":
     
 
     
+    zeroed = False
+
+    psi_1_start = 0.0
+    psi_2_start = 0.0
+    psi_3_start = 0.0
+
 
     for t in SoftRealtimeLoop(dt=DT, report=True):
         try:
@@ -482,6 +489,7 @@ if __name__ == "__main__":
             continue
         if(logData):
             t_now = time.time() - t_start
+       
 
         velocityControl = rob311_bt_controller.ltoggle
         # Define variables for saving / analysis here - below you can create variables from the available states in message_defs.py
@@ -490,6 +498,12 @@ if __name__ == "__main__":
         psi_1 = states['psi_1']
         psi_2 = states['psi_2']
         psi_3 = states['psi_3']
+
+        if(not zeroed):
+            zeroed = True
+            psi_1_start =psi_1
+            psi_2_start =psi_2
+            psi_3_start = psi_3
 
         dpsi1 = states['dpsi_1']
         dpsi2 = states['dpsi_2']
@@ -579,8 +593,19 @@ if __name__ == "__main__":
         #Tz = -2.5*(rob311_bt_controller.lx)**3
         desired_z = (rob311_bt_controller.tz_demo_2)**3
         if(compensateBackEmf):
-            z_pid.setpoint = desired_z*10
-            Tz= -z_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
+            #
+            
+            if(not rob311_bt_controller.rtoggle):
+                z_pid.setpoint += desired_z*10*DT
+                Tz = -z_pid((psi_1+psi_2+psi_3)-(psi_1_start+psi_2_start+psi_3_start))
+            else:
+                vz_pid.setpoint = desired_z*10 # velocity
+                Tz= -vz_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
+                z_pid.setpoint = 0
+                psi_1_start = psi_1
+                psi_2_start = psi_2
+                psi_3_start = psi_3
+                z_pid.reset()
         else:
             Tz = -desired_z*2.5
 
