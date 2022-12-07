@@ -204,20 +204,23 @@ MAX_PLANAR_DUTY = 0.75 #0.8
 MAX_LEAN = np.deg2rad(3)   #prev 10
 
 
-emf = 0.0636942675159*0.94
+emf = 0.0636942675159*1.02
+bias = 0.0
+gTorque = 0.33 # seems like maximum  0.4 when low battery
 
 usePID = True
 useFIR = False
 compensateBackEmf = True#bad feature :( actually good now
+compensateGravity = True
 velocityControl = True
 feedForward = False  #also bad
-logData = True
+logData = True #True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
 Fs = FREQ # Sampling rate in Hz
-Fc = 170 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
-Fc_psi = 10  #tried 0.3.... not sure.
+Fc = 100 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
+Fc_psi = 20  #tried 0.3.... not sure.  12 is good   30 works  20 works
 Fc_phi = 20   #good is 7-8  20 also works with decreased kp, and works super good
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
@@ -266,9 +269,9 @@ ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
 xRamp = Diff.SlewRateLimiter()
-xRamp.maxDerivative = 2.4 #1.5
+xRamp.maxDerivative = 8 #1.5
 yRamp = Diff.SlewRateLimiter()
-yRamp.maxDerivative = 2.4 #1.5 works conservatively
+yRamp.maxDerivative = 8 #1.5 works conservatively  2.4 works  4 works
 
 
 # ---------------------------------------------------------------------------
@@ -277,14 +280,14 @@ yRamp.maxDerivative = 2.4 #1.5 works conservatively
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 7.2    #7.5   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 7.2                                  # Adjust until the system balances
+KP_THETA_X = 6.7    #7.5 -7.0   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 6.7                                  # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.024   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz
-vx_pid = PID(KP_v,0,0.001,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
-vy_pid = PID(KP_v,0,0.001,DT)
+KP_v = 0.016   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
+vx_pid = PID(KP_v,0,0.00,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
+vy_pid = PID(KP_v,0,0.00,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 
@@ -453,7 +456,7 @@ if __name__ == "__main__":
 
     print('Beginning program!')
     i = 0
-    rob311_bt_controller.y_trim_count = 27   #36
+    rob311_bt_controller.y_trim_count = 3   #36
     rob311_bt_controller.x_trim_count = 6    #4
     
 
@@ -470,6 +473,7 @@ if __name__ == "__main__":
 
         t_now = time.time() - t_start
 
+        velocityControl = rob311_bt_controller.ltoggle
         # Define variables for saving / analysis here - below you can create variables from the available states in message_defs.py
         
         # Motor rotations
@@ -480,6 +484,8 @@ if __name__ == "__main__":
         dpsi1 = states['dpsi_1']
         dpsi2 = states['dpsi_2']
         dpsi3 = states['dpsi_3']
+
+
 
         dpsi_1f = lowpass_psi1.filter(dpsi1)
         dpsi_2f = lowpass_psi2.filter(dpsi2)
@@ -505,12 +511,12 @@ if __name__ == "__main__":
 
         
 
-        xCommand = -np.deg2rad(4*rob311_bt_controller.y_cmd)
-        yCommand = np.deg2rad(4*rob311_bt_controller.tz_demo_2)
+        xCommand = -np.deg2rad(4*rob311_bt_controller.ly)  #front/back
+        yCommand = np.deg2rad(4*rob311_bt_controller.lx) #tz_demo_2
         
         if(velocityControl):
-            phi_ycmd =  xCommand*60  #around 1 radian max, when 15
-            phi_xcmd =  yCommand*60
+            phi_ycmd =  xCommand*80  #around 1 radian max, when 15   60 is stable.
+            phi_xcmd =  yCommand*80
 
             phi_xcmd = xRamp.limit(phi_xcmd)
             phi_ycmd = yRamp.limit(phi_ycmd)
@@ -522,6 +528,8 @@ if __name__ == "__main__":
         else:
             desired_theta_x = xCommand
             desired_theta_y = yCommand
+            phi_xcmd = 0
+            phi_ycmd = 0
 
         # Controller error terms
         error_x = desired_theta_x - theta_x
@@ -557,12 +565,16 @@ if __name__ == "__main__":
             Ty = KP_THETA_Y * error_y
 
         #Tz = -2.5*(rob311_bt_controller.lx)**3
-        desired_z = (rob311_bt_controller.lx)**3
+        desired_z = (rob311_bt_controller.tz_demo_2)**3
         if(compensateBackEmf):
             z_pid.setpoint = desired_z*10
             Tz= -z_pid((dpsi_1f+dpsi_2f+dpsi_3f)/3)
         else:
             Tz = -desired_z*2.5
+
+        if(compensateGravity):
+            Tx -= np.sin(theta_x)*gTorque
+            Ty -= np.sin(theta_y)*gTorque
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -630,9 +642,9 @@ if __name__ == "__main__":
                 T2*=np.max([(1+e),0])
                 T3*=np.max([(1+e),0])
             else:
-                T1 += dpsi_1f*emf
-                T2 += dpsi_2f*emf
-                T3 += dpsi_3f*emf
+                T1 += dpsi_1f*emf + bias
+                T2 += dpsi_2f*emf + bias
+                T3 += dpsi_3f*emf + bias
         #----------------------------------------------------
 
         
