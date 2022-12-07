@@ -201,12 +201,12 @@ RK = 0.1210
 ALPHA = np.deg2rad(45)
 
 MAX_PLANAR_DUTY = 0.75 #0.8  
-MAX_LEAN = np.deg2rad(3)   #prev 10
+MAX_LEAN = np.deg2rad(2.5)   #prev 10
 
 
-emf = 0.0636942675159*1.02
+emf = 0.0636942675159*1.02 *1.1  #1.1 to compensate for drag
 bias = 0.0
-gTorque = 0.33 # seems like maximum  0.4 when low battery
+gTorque = 0.35 # seems like maximum  0.4 when low battery
 
 usePID = True
 useFIR = False
@@ -214,7 +214,7 @@ compensateBackEmf = True#bad feature :( actually good now
 compensateGravity = True
 velocityControl = True
 feedForward = False  #also bad
-logData = True #True
+logData =  False
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
@@ -269,9 +269,9 @@ ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
 xRamp = Diff.SlewRateLimiter()
-xRamp.maxDerivative = 8 #1.5
+xRamp.maxDerivative = 5 #1.5
 yRamp = Diff.SlewRateLimiter()
-yRamp.maxDerivative = 8 #1.5 works conservatively  2.4 works  4 works
+yRamp.maxDerivative = 5 #1.5 works conservatively  2.4 works  4 works
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +285,7 @@ KP_THETA_Y = 6.7                                  # Adjust until the system bala
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.016   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
+KP_v = 0.02   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
 vx_pid = PID(KP_v,0,0.00,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.00,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
@@ -467,11 +467,14 @@ if __name__ == "__main__":
             states = ser_dev.get_cur_topic_data(121)[0]
             if i == 0:
                 t_start = time.time()
-            i = i + 1
+                if(not logData):
+                    i = 1
+            if(logData):
+                i = i + 1
         except KeyError as e:
             continue
-
-        t_now = time.time() - t_start
+        if(logData):
+            t_now = time.time() - t_start
 
         velocityControl = rob311_bt_controller.ltoggle
         # Define variables for saving / analysis here - below you can create variables from the available states in message_defs.py
@@ -665,7 +668,7 @@ if __name__ == "__main__":
 
         # ---------------------------------------------------------
 
-        print("Iteration no. {}, T1: {:.2f}, T2: {:.2f}, T3: {:.2f}".format(i, T1, T2, T3))
+        #print("Iteration no. {}, T1: {:.2f}, T2: {:.2f}, T3: {:.2f}".format(i, T1, T2, T3))
         commands['motor_1_duty'] = T1
         commands['motor_2_duty'] = T2
         commands['motor_3_duty'] = T3  
@@ -681,7 +684,7 @@ if __name__ == "__main__":
             filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]
             filterLogger.appendData(filtering)
 
-        print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
+        #print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
         ser_dev.send_topic_data(101, commands) # Send motor torques
 
     if(logData):
