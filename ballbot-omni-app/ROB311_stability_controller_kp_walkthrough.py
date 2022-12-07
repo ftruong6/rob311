@@ -204,17 +204,20 @@ MAX_PLANAR_DUTY = 0.75 #0.8
 MAX_LEAN = np.deg2rad(2.5)   #prev 10
 
 
-emf = 0.0636942675159*1.02 *1.1  #1.1 to compensate for drag
+emf = 0.0636942675159*1.02   #1.1 to compensate for drag
 bias = 0.0
-gTorque = 0.35 # seems like maximum  0.4 when low battery
+gTorque = 0.33 # seems like maximum  0.4 when low battery
+kA = 0.007
 
 usePID = True
 useFIR = False
 compensateBackEmf = True#bad feature :( actually good now
 compensateGravity = True
+compensateAcceleration = False
 velocityControl = True
 feedForward = False  #also bad
 logData =  False
+printData = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
 
@@ -294,8 +297,8 @@ vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
     y_pid = PID(0, 0, 0, DT) #0.1
-    x_pid.Kd = 0.2
-    y_pid.Kd = 0.2
+    x_pid.Kd = 0  #0.2 standard
+    y_pid.Kd = 0  #0.
     z_pid = PID(0.16,0,0.01,DT)
     z_pid.output_limits = (-1,1)
 
@@ -518,8 +521,8 @@ if __name__ == "__main__":
         yCommand = np.deg2rad(4*rob311_bt_controller.lx) #tz_demo_2
         
         if(velocityControl):
-            phi_ycmd =  xCommand*80  #around 1 radian max, when 15   60 is stable.
-            phi_xcmd =  yCommand*80
+            phi_ycmd =  xCommand*60  #around 1 radian max, when 15   60 is stable.
+            phi_xcmd =  yCommand*60
 
             phi_xcmd = xRamp.limit(phi_xcmd)
             phi_ycmd = yRamp.limit(phi_ycmd)
@@ -578,6 +581,12 @@ if __name__ == "__main__":
         if(compensateGravity):
             Tx -= np.sin(theta_x)*gTorque
             Ty -= np.sin(theta_y)*gTorque
+
+        phi_x_accel = np.tan(theta_x)*9.81/RK
+        phi_y_accel = np.tan(theta_y)*9.81/RK
+        if(compensateAcceleration):
+            Tx -= kA*phi_x_accel
+            Ty -= kA*phi_y_accel
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -667,8 +676,8 @@ if __name__ == "__main__":
         #compute_phi(psi_1, psi_2, psi_3)
 
         # ---------------------------------------------------------
-
-        #print("Iteration no. {}, T1: {:.2f}, T2: {:.2f}, T3: {:.2f}".format(i, T1, T2, T3))
+        if(printData):
+            print("Iteration no. {}, T1: {:.2f}, T2: {:.2f}, T3: {:.2f}".format(i, T1, T2, T3))
         commands['motor_1_duty'] = T1
         commands['motor_2_duty'] = T2
         commands['motor_3_duty'] = T3  
@@ -683,8 +692,8 @@ if __name__ == "__main__":
 
             filtering = [i] +[t_now] +[theta_xfd] + [theta_yfd] + [dpsi_1f] + [dpsi_2f] + [dpsi_3f] + [dphi_xf] + [dphi_yf]
             filterLogger.appendData(filtering)
-
-        #print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
+        if(printData):
+            print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
         ser_dev.send_topic_data(101, commands) # Send motor torques
 
     if(logData):
