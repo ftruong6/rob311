@@ -176,7 +176,7 @@ class ROB311BTController(Controller):
     #y_cmd = 0.0
     def __init__(self, interface, connecting_using_ds4drv=False, event_definition=None, event_format=None):
         super().__init__(interface, connecting_using_ds4drv, event_definition, event_format)
-
+        self.ltoggle = True
         # ------------------------------------
         # Declare required attributes/values 
 
@@ -197,6 +197,8 @@ class ROB311BTController(Controller):
         self.ly = 0.0
         self.lx = 0.0
 
+        self.ltrigger = 0.0
+
         # ------------------------------------
 
     # Continuous value with Triggers
@@ -209,13 +211,20 @@ class ROB311BTController(Controller):
         # Reset values
         self.tz_demo_1 = 0.0
 
-    def on_L2_press(self, value):
-        # Normalizing raw values from [-1.0, 1.0] to [-1.0, 0.0]
-        self.tz_demo_1 = -1 * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+    def on_L2_press(self,value):
+        self.ltrigger = 0.0
+        self.ltrigger = (1.0 + value/JOYSTICK_SCALE)/2.0
 
     def on_L2_release(self):
+        self.ltrigger = 0.0
+
+    #def on_L2_press(self, value):
+        # Normalizing raw values from [-1.0, 1.0] to [-1.0, 0.0]
+    #    self.tz_demo_1 = -1 * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+
+    #def on_L2_release(self):
         # Reset values
-        self.tz_demo_1 = 0.0
+    #    self.tz_demo_1 = 0.0
     def on_L3_up(self, value):
         # Inverting y-axis value
         self.ly = -1.0 * value/JOYSTICK_SCALE
@@ -268,14 +277,12 @@ class ROB311BTController(Controller):
 
     def on_R1_press(self):
         print("R1 button pressed!")
-        self.tz_demo_3 += 1
-
+       
     def on_R1_release(self):
         pass
 
     def on_L1_press(self):
-        print("L1 button pressed!")
-        self.tz_demo_3 -= 1
+        self.ltoggle = not self.ltoggle
 
     def on_L1_release(self):
         pass
@@ -304,8 +311,8 @@ if __name__ == "__main__":
     # DEMO 3: Modifying Tz value with Shoulder/Bumper Buttons
 
     for t in SoftRealtimeLoop(dt=DT, report=True):
-        print("\n\nTz Demo 1: {}\nTz Demo 2: {}\nTz Demo 3: {}\n\n".format(
-            rob311_bt_controller.tz_demo_1,
+        print("\n\nltrigger: {}\nTz Demo 2: {}\nTz Demo 3: {}\n\n".format(
+            rob311_bt_controller.ltrigger,
             rob311_bt_controller.tz_demo_2,
             rob311_bt_controller.tz_demo_3
         ))

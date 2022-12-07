@@ -202,6 +202,8 @@ ALPHA = np.deg2rad(45)
 
 MAX_PLANAR_DUTY = 0.75 #0.8  
 MAX_LEAN = np.deg2rad(2.5)   #prev 10
+PHI_JOY_SCALE = 70
+PHI_TRIG_SCALE = 30  # max sum: 100. Conservative setting :60 
 
 
 emf = 0.0636942675159*1.02   #1.1 to compensate for drag
@@ -214,7 +216,7 @@ useFIR = False
 compensateBackEmf = True#bad feature :( actually good now
 compensateGravity = True
 compensateAcceleration = False
-velocityControl = True
+velocityControl = False
 feedForward = False  #also bad
 logData =  False
 printData = True
@@ -271,10 +273,12 @@ ffxRamp.maxDerivative = 0.1
 ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
+velRampJoy = 6
+velRampTrig = 4
 xRamp = Diff.SlewRateLimiter()
-xRamp.maxDerivative = 5 #1.5
+xRamp.maxDerivative = velRampJoy #1.5
 yRamp = Diff.SlewRateLimiter()
-yRamp.maxDerivative = 5 #1.5 works conservatively  2.4 works  4 works
+yRamp.maxDerivative = velRampJoy #1.5 works conservatively  2.4 works  4 works
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +301,8 @@ vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
     y_pid = PID(0, 0, 0, DT) #0.1
-    x_pid.Kd = 0  #0.2 standard
-    y_pid.Kd = 0  #0.
+    x_pid.Kd = 0.1#standard
+    y_pid.Kd = 0.1  #0.
     z_pid = PID(0.16,0,0.01,DT)
     z_pid.output_limits = (-1,1)
 
@@ -491,6 +495,8 @@ if __name__ == "__main__":
         dpsi2 = states['dpsi_2']
         dpsi3 = states['dpsi_3']
 
+        xRamp.maxDerivative = velRampJoy+velRampTrig*rob311_bt_controller.ltrigger
+        yRamp.maxDerivative = velRampJoy+velRampTrig*rob311_bt_controller.ltrigger
 
 
         dpsi_1f = lowpass_psi1.filter(dpsi1)
@@ -521,8 +527,8 @@ if __name__ == "__main__":
         yCommand = np.deg2rad(4*rob311_bt_controller.lx) #tz_demo_2
         
         if(velocityControl):
-            phi_ycmd =  xCommand*60  #around 1 radian max, when 15   60 is stable.
-            phi_xcmd =  yCommand*60
+            phi_ycmd =  xCommand*(PHI_JOY_SCALE+rob311_bt_controller.ltrigger*PHI_TRIG_SCALE) #around 1 radian max, when 15   60 is stable.
+            phi_xcmd =  yCommand*(PHI_JOY_SCALE+rob311_bt_controller.ltrigger*PHI_TRIG_SCALE)
 
             phi_xcmd = xRamp.limit(phi_xcmd)
             phi_ycmd = yRamp.limit(phi_ycmd)
@@ -545,7 +551,7 @@ if __name__ == "__main__":
 
         # Proportional controller
         theta_xfd=lowpass_filter_x.filter(theta_x)
-        theta_yfd=lowpass_filter_x.filter(theta_y)
+        theta_yfd=lowpass_filter_y.filter(theta_y)
         #theta_xfd = 0
         #theta_yfd = 0
 
