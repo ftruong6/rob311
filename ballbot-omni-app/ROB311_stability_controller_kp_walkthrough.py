@@ -201,7 +201,7 @@ RK = 0.1210
 ALPHA = np.deg2rad(45)
 
 MAX_PLANAR_DUTY = 0.75 #0.8  
-MAX_LEAN = np.deg2rad(2.5)   #prev 10  2.5
+MAX_LEAN = np.deg2rad(3)   #prev 10  2.5
 PHI_JOY_SCALE = 60 
 PHI_TRIG_SCALE = 20  # max sum: 100. Conservative setting :60 
 
@@ -225,7 +225,7 @@ printData = True
 
 Fs = FREQ # Sampling rate in Hz
 Fc = 100 # Cut-off frequency of the filter in Hz    100hz for lpf-s is mostly unjagged. see trial 12413   150  seems good. stopped oscillating. 120 graph shows reasonable
-Fc_psi = 20  #tried 0.3.... not sure.  12 is good   30 works  20 works
+Fc_psi = 60  #tried 0.3.... not sure.  12 is good   30 works  20 works
 Fc_phi = 20   #good is 7-8  20 also works with decreased kp, and works super good
 Fn = Fc/Fs # Normalized equivalent of Fc
 N = 60 # Taps of the filter
@@ -287,12 +287,12 @@ yRamp.maxDerivative = velRampJoy #1.5 works conservatively  2.4 works  4 works
 
 # Proportional gains for the stability controllers (X-Z and Y-Z plane)
 
-KP_THETA_X = 6.7    #7.5 -7.0   #10 has weird oscillation                               # Adjust until the system balances
-KP_THETA_Y = 6.7                                  # Adjust until the system balances
+KP_THETA_X = 5.5    #7.5 -7.0   #10 has weird oscillation                               # Adjust until the system balances
+KP_THETA_Y = 5.5                                  # Adjust until the system balances
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.024  #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
+KP_v = 0.02  #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
 vx_pid = PID(KP_v,0,0.00,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.00,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
