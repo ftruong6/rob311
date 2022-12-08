@@ -209,16 +209,16 @@ PHI_TRIG_SCALE = 30  # max sum: 100. Conservative setting :60
 emf = 0.0636942675159*1.02   #1.1 to compensate for drag
 bias = 0.0
 gTorque = 0.33 # seems like maximum  0.4 when low battery
-kA = 0.007
+kA = 0.004
 
 usePID = True
 useFIR = False
 compensateBackEmf = True#bad feature :( actually good now
 compensateGravity = True
 compensateAcceleration = False
-velocityControl = False
+velocityControl = True
 feedForward = False  #also bad
-logData =  False
+logData =  True
 printData = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
@@ -292,7 +292,7 @@ KP_THETA_Y = 6.7                                  # Adjust until the system bala
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.02   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
+KP_v = 0.027   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
 vx_pid = PID(KP_v,0,0.00,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.00,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
@@ -301,8 +301,8 @@ vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
     y_pid = PID(0, 0, 0, DT) #0.1
-    x_pid.Kd = 0.1#standard
-    y_pid.Kd = 0.1  #0.
+    x_pid.Kd = 0.05#standard
+    y_pid.Kd = 0.05  #0.
     vz_pid = PID(0.16,0,0.01,DT) # velocity gains
     z_pid = PID(0.4,0,0.08,DT)
     z_pid.output_limits = (-1,1)
@@ -702,8 +702,6 @@ if __name__ == "__main__":
 
         
         # ---------------------------------------------------------
-
-        
         #compute_phi(psi_1, psi_2, psi_3)
 
         # ---------------------------------------------------------
