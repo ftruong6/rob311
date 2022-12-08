@@ -201,9 +201,9 @@ RK = 0.1210
 ALPHA = np.deg2rad(45)
 
 MAX_PLANAR_DUTY = 0.75 #0.8  
-MAX_LEAN = np.deg2rad(2.5)   #prev 10
-PHI_JOY_SCALE = 70
-PHI_TRIG_SCALE = 30  # max sum: 100. Conservative setting :60 
+MAX_LEAN = np.deg2rad(2.5)   #prev 10  2.5
+PHI_JOY_SCALE = 60 
+PHI_TRIG_SCALE = 20  # max sum: 100. Conservative setting :60 
 
 
 emf = 0.0636942675159*1.02   #1.1 to compensate for drag
@@ -218,7 +218,7 @@ compensateGravity = True
 compensateAcceleration = False
 velocityControl = True
 feedForward = False  #also bad
-logData =  True
+logData =  True 
 printData = True
 # ---------------------------------------------------------------------------
 # LOWPASS FILTER PARAMETERS
@@ -273,7 +273,7 @@ ffxRamp.maxDerivative = 0.1
 ffyRamp = Diff.SlewRateLimiter()
 ffyRamp.maxDerivative = 0.1
 
-velRampJoy = 4
+velRampJoy = 8
 velRampTrig = 4
 xRamp = Diff.SlewRateLimiter()
 xRamp.maxDerivative = velRampJoy #1.5
@@ -292,7 +292,7 @@ KP_THETA_Y = 6.7                                  # Adjust until the system bala
 
 # ---------------------------------------------------------------------------
 #############################################################################
-KP_v = 0.027   #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
+KP_v = 0.024  #0.05 @ 8hz  0.02 @20 hz   0.015@50hz   right now : 0.24   0.005@30hz
 vx_pid = PID(KP_v,0,0.00,DT)   #0.002-0.003  0.001@20hz 0.0005@30hz
 vy_pid = PID(KP_v,0,0.00,DT)
 vx_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
@@ -301,8 +301,8 @@ vy_pid.output_limits = (-MAX_LEAN,MAX_LEAN)
 if(usePID):
     x_pid = PID(0, 0, 0, DT) #0.1  tall 
     y_pid = PID(0, 0, 0, DT) #0.1
-    x_pid.Kd = 0.05#standard
-    y_pid.Kd = 0.05  #0.
+    x_pid.Kd = 0.12#standard
+    y_pid.Kd = 0.12  #0.
     vz_pid = PID(0.16,0,0.01,DT) # velocity gains
     z_pid = PID(0.4,0,0.08,DT)
     z_pid.output_limits = (-1,1)
@@ -505,9 +505,12 @@ if __name__ == "__main__":
             psi_2_start =psi_2
             psi_3_start = psi_3
 
-        dpsi1 = states['dpsi_1']
-        dpsi2 = states['dpsi_2']
-        dpsi3 = states['dpsi_3']
+        #dpsi1 = states['dpsi_1']
+        #dpsi2 = states['dpsi_2']
+        #dpsi3 = states['dpsi_3']
+        dpsi1 = psi1Diff.differentiate(psi_1)
+        dpsi2 = psi2Diff.differentiate(psi_2)
+        dpsi3 = psi3Diff.differentiate(psi_3)
 
         xRamp.maxDerivative = velRampJoy+velRampTrig*rob311_bt_controller.ltrigger
         yRamp.maxDerivative = velRampJoy+velRampTrig*rob311_bt_controller.ltrigger
